@@ -113,43 +113,39 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
-	"time"
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// Stores a handle to the collection being used by the Lambda function
 type Connection struct {
-	database *mongo.Database
+	collection *mongo.Collection
 }
 
 func main() {
-	client, err := mongo.NewClient(options.Client().ApplyURI(os.Getenv("ATLAS_URI")))
+	ctx := context.Background()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(os.Getenv("ATLAS_URI")))
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
-	err = client.Connect(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
+
 	defer client.Disconnect(ctx)
-	database := client.Database("alexa")
+
 	connection := Connection{
-		database: database,
+		collection: client.Database("alexa").Collection("recipes"),
 	}
 }
 ```
 
 In the `main` function we are creating a client using the connection string of our cluster. In this case, I'm using an environment variable on my computer that points to my MongoDB Atlas cluster. Feel free to configure that connection string however you feel the most confident.
 
-Before attempting to connect, we are setting a generous timeout of ten seconds. Upon connecting, we are getting a handle of an `alexa` database and storing it in a `Connection` data structure. If the `alexa` database doesn't exist, it will create one if we try to create data.
+Upon connecting, we are getting a handle of a `recipes` collection for an `alexa` database and storing it in a `Connection` data structure. Because we won't be writing any data in this example, both the `alexa` database and the `recipes` collection should exist prior to running this application.
 
 You can check out more information about connecting to MongoDB with the Go programming language in a [previous tutorial](https://www.mongodb.com/blog/post/quick-start-golang--mongodb--starting-and-setup) I wrote.
 
-So why are we storing the database handle in a `Connection` data structure?
+So why are we storing the collection handle in a `Connection` data structure?
 
 AWS Lambda behaves a little differently when it comes to web applications. Instead of running the `main` function and then remaining alive for as long as your server remains alive, Lambda functions tend to suspend or shutdown when they are not used. For this reason, we cannot rely on our connection being available and we also don't want to establish too many connections to our database in the scenario where our function hasn't shut down. To handle this, we can pass the connection from our `main` function to our logic function.
 
@@ -160,9 +156,7 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
-	"time"
 
 	"github.com/arienmalec/alexa-go"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -170,8 +164,9 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// Stores a handle to the collection being used by the Lambda function
 type Connection struct {
-	database *mongo.Database
+	collection *mongo.Collection
 }
 
 func (connection Connection) IntentDispatcher(ctx context.Context, request alexa.Request) (alexa.Response, error) {
@@ -179,20 +174,18 @@ func (connection Connection) IntentDispatcher(ctx context.Context, request alexa
 }
 
 func main() {
-	client, err := mongo.NewClient(options.Client().ApplyURI(os.Getenv("ATLAS_URI")))
+	ctx := context.Background()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(os.Getenv("ATLAS_URI")))
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
-	err = client.Connect(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
+
 	defer client.Disconnect(ctx)
-	database := client.Database("alexa")
+
 	connection := Connection{
-		database: database,
+		collection: client.Database("alexa").Collection("recipes"),
 	}
+
 	lambda.Start(connection.IntentDispatcher)
 }
 ```
@@ -221,8 +214,9 @@ There is no doubt that our documents could be more extravagant, but for this exa
 In the `main.go` file of the project, add the following data structure:
 
 ```go
+// A data structure representation of the collection schema
 type Recipe struct {
-	Id          primitive.ObjectID `bson:"_id"`
+	ID          primitive.ObjectID `bson:"_id"`
 	Name        string             `bson:"name"`
 	Ingredients []string           `bson:"ingredients"`
 }
@@ -253,16 +247,15 @@ Let's start with the `GetIngredientsForRecipeIntent` logic:
 
 ```go
 case "GetIngredientsForRecipeIntent":
-    var recipe Recipe
-    recipesCollection := connection.database.Collection("recipes")
-    recipeName := request.Body.Intent.Slots["recipe"].Value
-    if recipeName == "" {
-        return alexa.Response{}, errors.New("Recipe name is not present in the request")
-    }
-    if err := recipesCollection.FindOne(ctx, bson.M{"name": recipeName}).Decode(&recipe); err != nil {
-        return alexa.Response{}, err
-    }
-    response = alexa.NewSimpleResponse("Ingredients", strings.Join(recipe.Ingredients, ", "))
+	var recipe Recipe
+	recipeName := request.Body.Intent.Slots["recipe"].Value
+	if recipeName == "" {
+		return alexa.Response{}, errors.New("Recipe name is not present in the request")
+	}
+	if err := connection.collection.FindOne(ctx, bson.M{"name": recipeName}).Decode(&recipe); err != nil {
+		return alexa.Response{}, err
+	}
+	response = alexa.NewSimpleResponse("Ingredients", strings.Join(recipe.Ingredients, ", "))
 ```
 
 In the above snippet, we are getting the slot variable that was passed and are issuing a `FindOne` query against the collection. The filter for the query says that the `name` field of the document must match the recipe that was passed in as a slot variable.
@@ -273,27 +266,30 @@ Now let's take a look at the `GetRecipeFromIngredientsIntent` intent logic:
 
 ```go
 case "GetRecipeFromIngredientsIntent":
-    var recipes []Recipe
-    recipesCollection := connection.database.Collection("recipes")
-    ingredient1 := request.Body.Intent.Slots["ingredientone"].Value
-    ingredient2 := request.Body.Intent.Slots["ingredienttwo"].Value
-    cursor, err := recipesCollection.Find(ctx, bson.M{"ingredients": bson.D{{"$all", bson.A{ingredient1, ingredient2}}}})
-    if err != nil {
-        return alexa.Response{}, err
-    }
-    if err = cursor.All(ctx, &recipes); err != nil {
-        return alexa.Response{}, err
-    }
-    recipeList := ""
-    for _, recipe := range recipes {
-        recipeList += recipe.Name
-    }
-    response = alexa.NewSimpleResponse("Recipes", recipeList)
+	var recipes []Recipe
+	ingredient1 := request.Body.Intent.Slots["ingredientone"].Value
+	ingredient2 := request.Body.Intent.Slots["ingredienttwo"].Value
+	cursor, err := connection.collection.Find(ctx, bson.M{
+		"ingredients": bson.D{
+			{"$all", bson.A{ingredient1, ingredient2}},
+		},
+	})
+	if err != nil {
+		return alexa.Response{}, err
+	}
+	if err = cursor.All(ctx, &recipes); err != nil {
+		return alexa.Response{}, err
+	}
+	var recipeList []string
+	for _, recipe := range recipes {
+		recipeList = append(recipeList, recipe.Name)
+	}
+	response = alexa.NewSimpleResponse("Recipes", strings.Join(recipeList, ", "))
 ```
 
 In the above snippet, we are taking both slot variables that represent ingredients and are using them in a `Find` query on the collection. This time around we are using the `$all` operator because we want to filter for all recipes that contain both ingredients anywhere in the array.
 
-With the results of the `Find`, we can create a string to be returned as part of the Alexa response.
+With the results of the `Find`, we can create create an array of the recipe names and serialize it to a string to be returned as part of the Alexa response.
 
 If you'd like more information on the `Find` and `FindOne` commands for Go and MongoDB, check out my [previous tutorial](https://www.mongodb.com/blog/post/quick-start-golang--mongodb--how-to-read-documents) on the subject.
 

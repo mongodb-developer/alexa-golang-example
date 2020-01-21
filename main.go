@@ -3,10 +3,8 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
 	"os"
 	"strings"
-	"time"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
@@ -17,12 +15,14 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// Stores a handle to the collection being used by the Lambda function
 type Connection struct {
-	database *mongo.Database
+	collection *mongo.Collection
 }
 
+// A data structure representation of the collection schema
 type Recipe struct {
-	Id          primitive.ObjectID `bson:"_id"`
+	ID          primitive.ObjectID `bson:"_id"`
 	Name        string             `bson:"name"`
 	Ingredients []string           `bson:"ingredients"`
 }
@@ -32,32 +32,34 @@ func (connection Connection) IntentDispatcher(ctx context.Context, request alexa
 	switch request.Body.Intent.Name {
 	case "GetIngredientsForRecipeIntent":
 		var recipe Recipe
-		recipesCollection := connection.database.Collection("recipes")
 		recipeName := request.Body.Intent.Slots["recipe"].Value
 		if recipeName == "" {
 			return alexa.Response{}, errors.New("Recipe name is not present in the request")
 		}
-		if err := recipesCollection.FindOne(ctx, bson.M{"name": recipeName}).Decode(&recipe); err != nil {
+		if err := connection.collection.FindOne(ctx, bson.M{"name": recipeName}).Decode(&recipe); err != nil {
 			return alexa.Response{}, err
 		}
 		response = alexa.NewSimpleResponse("Ingredients", strings.Join(recipe.Ingredients, ", "))
 	case "GetRecipeFromIngredientsIntent":
 		var recipes []Recipe
-		recipesCollection := connection.database.Collection("recipes")
 		ingredient1 := request.Body.Intent.Slots["ingredientone"].Value
 		ingredient2 := request.Body.Intent.Slots["ingredienttwo"].Value
-		cursor, err := recipesCollection.Find(ctx, bson.M{"ingredients": bson.D{{"$all", bson.A{ingredient1, ingredient2}}}})
+		cursor, err := connection.collection.Find(ctx, bson.M{
+			"ingredients": bson.D{
+				{"$all", bson.A{ingredient1, ingredient2}},
+			},
+		})
 		if err != nil {
 			return alexa.Response{}, err
 		}
 		if err = cursor.All(ctx, &recipes); err != nil {
 			return alexa.Response{}, err
 		}
-		recipeList := ""
+		var recipeList []string
 		for _, recipe := range recipes {
-			recipeList += recipe.Name
+			recipeList = append(recipeList, recipe.Name)
 		}
-		response = alexa.NewSimpleResponse("Recipes", recipeList)
+		response = alexa.NewSimpleResponse("Recipes", strings.Join(recipeList, ", "))
 	case "AboutIntent":
 		response = alexa.NewSimpleResponse("About", "Created by Nic Raboy in Tracy, CA")
 	default:
@@ -67,19 +69,17 @@ func (connection Connection) IntentDispatcher(ctx context.Context, request alexa
 }
 
 func main() {
-	client, err := mongo.NewClient(options.Client().ApplyURI(os.Getenv("ATLAS_URI")))
+	ctx := context.Background()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(os.Getenv("ATLAS_URI")))
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
-	err = client.Connect(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
+
 	defer client.Disconnect(ctx)
-	database := client.Database("alexa")
+
 	connection := Connection{
-		database: database,
+		collection: client.Database("alexa").Collection("recipes"),
 	}
+
 	lambda.Start(connection.IntentDispatcher)
 }

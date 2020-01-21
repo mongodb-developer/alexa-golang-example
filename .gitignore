@@ -2,4 +2,7 @@ vendor
 
 Gopkg.lock
 
+alexa-example-golang
+handler.zip
+
 .DS_Store*
