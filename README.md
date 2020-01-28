@@ -1,14 +1,16 @@
 # Developing Alexa Skills with MongoDB and Golang
 
-The popularity of Amazon Alexa and virtual assistants in general is no question, huge. Having a web application and mobile application isn't enough anymore, and now you need to start supporting voice operated applications.
+The popularity of [Amazon Alexa](https://developer.amazon.com/en-US/alexa) and virtual assistants in general is no question, huge. Having a web application and mobile application isn't enough for most organizations anymore, and now you need to start supporting voice operated applications.
 
 So what does it take to create something for Alexa? How different is it from creating a web application?
 
-In this tutorial we're going to see how to create an Amazon Alexa Skill that interacts with a MongoDB cluster using the Go programming language (Golang) and AWS Lambda.
+In this tutorial we're going to see how to create an Amazon Alexa Skill, also referred to as an Alexa application, that interacts with a MongoDB cluster using the Go programming language (Golang) and AWS Lambda.
+
+![Alexa Demo](demo.gif "Alexa Demo")
 
 ## The Requirements
 
-There are a few requirements that must be met prior to starting this tutorial:
+A few requirements must be met prior to starting this tutorial:
 
 - Golang must be installed and configured
 - A MongoDB Atlas cluster
@@ -16,6 +18,8 @@ There are a few requirements that must be met prior to starting this tutorial:
 If you don't have a [MongoDB Atlas](https://www.mongodb.com/cloud) cluster, you can configure one for free. For this example an M0 cluster is more than sufficient.
 
 > Using promotional code NRABOY200 will give you $200 in premium credit on your Atlas account for a more powerful cluster beyond the forever free M0 cluster.
+
+Make sure the Atlas cluster has been properly whitelisted for AWS services. If AWS Lambda cannot reach your cluster then requests made by Alexa will fail.
 
 Having an Amazon Echo or other Amazon Alexa enabled device is not necessary to be successful with this tutorial. Amazon offers a really great simulator that can be used directly in the web browser.
 
@@ -318,13 +322,22 @@ Now it comes down to linking Alexa with Lambda.
 
 Take note of the **ARN** value of your Lambda function. This will be added in the Alexa Portal. Also, make sure you add the Alexa Skills Kit as a trigger to the function. It is as simple as selecting it from the list.
 
-Navigate back to the Alexa Developer Portal and choose the **Endpoint** checklist item. Add the ARN value and choose to build the Skill.
+Navigate back to the [Alexa Developer Portal](https://developer.amazon.com/alexa/console/ask) and choose the **Endpoint** checklist item. Add the ARN value to the default region and choose to build the Skill using the **Build Model** button.
 
-When the Skill is done building, you can test it using the simulator that Amazon offers as part of the Alexa Developer Portal.
+When the Skill is done building, you can test it using the simulator that Amazon offers as part of the Alexa Developer Portal. This simulator can be accessed using the **Test** tab within the portal.
+
+If you've used the same sample utterances that I have, you can try entering something like this:
+
+```plaintext
+ask recipe manager what can i cook with flour and sugar
+ask recipe manager what chocolate chip cookies requires
+```
+
+Of course the assumption is that you also have collection entries for chocolate chip cookies and the various ingredients that I used above. Feel free to modify the variable terms with those of your own data.
 
 ## Conclusion
 
-You just saw how to build an Alexa Skill with [MongoDB](https://www.mongodb.com), Golang, and AWS Lambda. It is great to know how to develop applications for voice assistants like Alexa because they are becoming increasingly popular, and the good news is that they aren't any more difficult than writing standard applications.
+You just saw how to build an Alexa Skill with [MongoDB](https://www.mongodb.com), Golang, and AWS Lambda. Knowing how to develop applications for voice assistants like Alexa is great because they are becoming increasingly popular, and the good news is that they aren't any more difficult than writing standard applications.
 
 As previously mentioned, MongoDB Atlas makes pairing MongoDB with Lambda and Alexa very convenient. You can use the free tier or upgrade to something better with some promotional credits using coupon NRABOY200.
 
